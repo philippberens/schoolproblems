@@ -1,20 +1,59 @@
 ---
-title: "Analysis of school problems"
+title: "Analysis of school problem dataset"
 output: html_document
 ---
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r global_options, include=FALSE}
+library(car)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(Rmisc)
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```
+
+This dataset contains questionnaire responses of 573 students from regular and hospital schools. 
+
+We first load the cleaned data and compute the SDQ scores. To this end, we use a custom adaptation of the "official" R function provided on the [SDQ website](http://www.sdqinfo.com/c9.html).
 
 ```{r}
-summary(cars)
+# import the data
+data = read.csv("D:/lab/projects/schoolproblems2/data/schooldata.csv")
+
+# import the function to compute sdq scores
+source("D:/lab/projects/schoolproblems2/code/sdq_eval.r")
+
+# compute sdq scores and append to dataframe
+sdq <- sdq_eval(data)
+data <- data.frame(data,sdq)
+
 ```
 
-You can also embed plots, for example:
+** Validating the SDQ results
 
-```{r, echo=FALSE}
-plot(cars)
+We explore the distribution of SDQ scores for regular and hospital schools separately.The thin grey lines indicate the four scale levels for a *slightly raised* score (15-17), a *high* score (18-19) and a *very high* score (>20).
+
+```{r echo=FALSE}
+ggplot(data, aes(x=sdq_total)) +
+  geom_vline(aes(xintercept=14.5), color="grey") + 
+  geom_vline(aes(xintercept=17.5), color="grey") + 
+  geom_vline(aes(xintercept=19.5), color="grey") + 
+  geom_histogram(breaks=seq(-.5,40.5,1),alpha=.5) +    
+  facet_grid(TYP ~ . ) +   
+  xlab("SDQ") + ylab("Number") + 
+  theme_grey(base_size=14)  
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+For easy visual judgement, we also plot the empirical cumulative distributions:
+
+```{r echo=FALSE}
+ggplot(data, aes(x=sdq_total, color=TYP)) +
+  geom_vline(aes(xintercept=14.5), color="grey") + 
+  geom_vline(aes(xintercept=17.5), color="grey") + 
+  geom_vline(aes(xintercept=19.5), color="grey") + 
+  stat_ecdf(geom="step") +
+  xlab("SDQ") + ylab("Fraction") + 
+  theme_grey(base_size=14)  
+```
+
