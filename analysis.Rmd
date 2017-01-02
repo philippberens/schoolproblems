@@ -9,6 +9,7 @@ library(plyr)
 library(dplyr)
 library(ggplot2)
 library(Rmisc)
+library(psych)
 
 
 ```
@@ -23,10 +24,18 @@ data = read.csv("D:/lab/projects/schoolproblems2/data/schooldata.csv")
 
 # import the function to compute sdq scores
 source("D:/lab/projects/schoolproblems2/code/sdq_eval.r")
+source("D:/lab/projects/schoolproblems2/code/score_items.r")
 
 # compute sdq scores and append to dataframe
 sdq <- sdq_eval(data)
 data <- data.frame(data,sdq)
+
+# compute scored items
+sdata <- score_items(data)
+
+
+write.csv(data,file="D:/lab/projects/schoolproblems2/data/schooldata_withsdq.csv", na=" ", eol = "\r\n")
+
 
 ```
 
@@ -40,7 +49,7 @@ ggplot(data, aes(x=sdq_total)) +
   geom_vline(aes(xintercept=17.5), color="grey") + 
   geom_vline(aes(xintercept=19.5), color="grey") + 
   geom_histogram(breaks=seq(-.5,40.5,1),alpha=.5) +    
-  facet_grid(TYP ~ . ) +   
+  facet_grid(TYP ~ SD01 ) +   
   xlab("SDQ") + ylab("Number") + 
   theme_grey(base_size=14)  
 ```

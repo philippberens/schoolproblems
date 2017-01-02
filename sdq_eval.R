@@ -90,4 +90,6 @@ sdq_eval <- function(df) {
   
   sdq = data.frame(sdq_total, sdq_external, sdq_internal, sdq_impact)
   
+  return(sdq)
+  
 }
