@@ -1,5 +1,5 @@
 ---
-title: "Analysis of school problem dataset"
+title: "Compute SDQ"
 output: html_document
 ---
 

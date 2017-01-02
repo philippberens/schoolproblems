@@ -1,16 +1,395 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "Problems in school reported by children in regular and hospital schools"
+author: "Judith Janschewski (TU Dortmund) and Philipp Berens (Uni Tübingen)"
+output:
+  pdf_document:
+    df_print: kable
+    number_sections: yes
+  html_notebook: default
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+```{r global_options, include=FALSE}
+#library(car)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(Rmisc)
+library(psych)
 
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
-
-```{r}
-plot(cars)
+knitr::opts_chunk$set(fig.width=5,  fig.height=2.5, warning=FALSE, echo=FALSE)
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+# Dataset
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+```{r echo=FALSE}
+# import the data
+data <- read.csv("D:/lab/projects/schoolproblems2/data/schooldata_withsdq.csv",na.strings=c("-9","NA"," ","-1","other"))
+data <- subset(data, select=c('TYP','SD01','sdq_total','sdq_external','sdq_internal','SS04_01',
+                              'SS04_02', 'SS04_03', 'SS04_06', 'SS08_01', 'SS08_02', 'SS08_03', 
+                              'SS08_04', 'SS05_05', 'SS03_01', 'SS03_02', 'SS03_03', 'SS03_04',
+                              'SB01_01', 'SB01_03', 'SB01_04', 'SB01_02', 'SS02', 'SB04_01',
+                              'SD25'))
+
+data <- plyr::rename(data,c("TYP"="school_type","SD01"="gender","SD25"="age"))
+
+
+data$age <- factor(mapvalues(data$age,from=c(1,2,3,4), to=c("11-12","13-14","15-16","17-18")))
+
+```
+
+The dataset contains questionnaire responses of `r nrow(data)` students from regular and hospital schools. The following tables provides an overview: 
+
+```{r results='asis'}
+
+cdata <- ddply(data, c("gender"), summarise,
+               N    = length(sdq_total))
+
+cdata
+```
+
+
+```{r results='asis'}
+cdata <- ddply(data, c("school_type"), summarise,
+               N    = length(sdq_total))
+
+cdata
+```
+
+```{r results='asis'}
+cdata <- ddply(data, c("gender", "school_type"), summarise,
+               N    = length(sdq_total))
+
+cdata
+```
+
+
+```{r results='asis'}
+cdata <- ddply(data, c("age"), summarise,
+               N    = length(sdq_total))
+
+cdata
+```
+
+
+
+# Validating the SDQ results
+
+We explore the distribution of SDQ scores for regular (A) and hospital (K) schools separately. The thin  lines indicate the four scale levels for a *slightly raised* score (15-17), a *high* score (18-19) and a *very high* score (>20).
+
+```{r SDQ_hist, fig.width=6, fig.height=4}
+ggplot(filter(data, !is.na(data$gender)), aes(x=sdq_total)) +
+  geom_vline(aes(xintercept=14.5), color="darkgrey", linetype="dashed") + 
+  geom_vline(aes(xintercept=17.5), color="darkgrey", linetype="dashed") + 
+  geom_vline(aes(xintercept=19.5), color="darkgrey", linetype="dashed") + 
+  geom_histogram(aes(y=..density..),breaks=seq(-.5,40.5,1),alpha=.5) +    
+  facet_grid(school_type ~ gender ) +   
+  xlab("SDQ") + ylab("Number") + 
+  theme_minimal(base_size=12)  
+```
+
+The  cumulative SDQ distributions of general (A) and hosptial (K) schools show a clear shift between the two student populations:
+
+```{r echo=FALSE, fig.width=4, fig.height=3}
+ggplot(data, aes(x=sdq_total, color=school_type)) +
+  geom_vline(aes(xintercept=14.5), color="darkgrey", linetype="dashed") + 
+  geom_vline(aes(xintercept=17.5), color="darkgrey", linetype="dashed") + 
+  geom_vline(aes(xintercept=19.5), color="darkgrey", linetype="dashed") + 
+  stat_ecdf(geom="step") +    
+  xlab("SDQ") + ylab("Fraction") + 
+  theme_minimal(base_size=12)  
+```
+
+The percentage of students with raised SDQ in general schools corresponds approximately to that expected:
+
+```{r fraction_raised, echo=FALSE}
+
+cdata <- ddply(data, c("school_type"), summarise,
+                  N    = length(sdq_total),
+                  fraction_raised = mean(sdq_total>=15, na.rm=TRUE),
+                  fraction_vhigh = mean(sdq_total>=20, na.rm=TRUE))
+
+cdata
+```
+
+# Overview of item responses
+
+We first provide an overview of several of the response items.
+
+## Social problems
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS04_01)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I often have conflicts with other students") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS04_02)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I often have conflicts with teachers") + ylab("Relative frequency") + 
+theme_minimal(base_size=12)  
+```
+
+
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS04_03)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I isolated myself recently in school") + ylab("Relative frequency") + 
+theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS04_06)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I do not like large groups like my class") + ylab("Relative frequency") + 
+theme_minimal(base_size=12)  
+```
+
+
+```{r , echo=FALSE}
+
+cdata <- ddply(filter(data, !is.na(data$gender)), c("school_type", "gender"), summarise,
+                  N    = length(sdq_total),
+                  conflict_stud = mean(SS04_01, na.rm=TRUE),
+                  conflict_teach = mean(SS04_02, na.rm=TRUE),
+                  isolation = mean(SS04_03, na.rm=TRUE),
+                  large_groups = mean(SS04_06, na.rm=TRUE))
+
+cdata
+```
+
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS08_01)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I have friends in my class") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS08_02)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I am bullied by other students") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS08_04)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("Sometimes I am agressive") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+
+```{r , echo=FALSE}
+
+cdata <- ddply(filter(data, !is.na(data$gender)), c("school_type", "gender"), summarise,
+                  N    = length(sdq_total),
+                  friends = mean(SS08_01, na.rm=TRUE),
+                  bullying = mean(SS08_02, na.rm=TRUE),
+                  outsider = mean(SS08_03, na.rm=TRUE),
+                  agressive = mean(SS08_04, na.rm=TRUE))
+
+cdata
+```
+
+## School performance
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS03_01)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("My school performance declined last year") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+The next item shows a pretty centered, almost Normal distribution. This is interesting - I would imaginge this may indicate that the students did not understand the question properly.
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS03_02)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I can concentrate well on school content") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS03_03)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I can work independently") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS03_04)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I quickly loose motivation to work") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r , echo=FALSE}
+
+cdata <- ddply(filter(data, !is.na(data$gender)), c("school_type", "gender"), summarise,
+                  N    = length(sdq_total),
+                  perf_down = mean(SS03_01, na.rm=TRUE),
+                  concentrate = mean(SS03_02, na.rm=TRUE),
+                  independent = mean(SS03_03, na.rm=TRUE),
+                  loose_mot = mean(SS03_04, na.rm=TRUE))
+
+cdata
+```
+
+
+## Wellbeing/attitude
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SB01_01)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I like to go to school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SB01_03)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I am afraid of going to school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+The next item again may not have been properly understood:
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SB01_04)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("I can easily handle what is asked of me at school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SB01_02)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("School is important for me") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r , echo=FALSE}
+
+cdata <- ddply(filter(data, !is.na(data$gender)), c("school_type", "gender"), summarise,
+                  N    = length(sdq_total),
+                  like_school = mean(SB01_01, na.rm=TRUE),
+                  afraid = mean(SB01_03, na.rm=TRUE),
+                  handle = mean(SB01_04, na.rm=TRUE),
+                  important = mean(SB01_02, na.rm=TRUE))
+
+cdata
+```
+
+## Other items
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SB04_01)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("School is a burden for me") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS02)) +
+  geom_histogram(aes(y=..density..,fill=school_type), position = "dodge", binwidth=1, center=1) +    
+  facet_grid(. ~gender) +   
+  xlab("How often were you absent from school last year?") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r, fig.width=4}
+
+ggplot(filter(data, !is.na(data$gender)), aes(x=SS05_05)) +
+  geom_histogram(aes(y=..density..,fill=gender), position = "dodge", binwidth=1, center=1) +    
+  xlab("After my stay at the clinic, I want to go back to my old school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+```{r , echo=FALSE}
+
+cdata <- ddply(filter(data, !is.na(data$gender)), c("school_type", "gender"), summarise,
+                  N    = length(sdq_total),
+                  burden = mean(SS04_01, na.rm=TRUE),
+                  absence = mean(SS02, na.rm=TRUE),
+                  goback = mean(SS05_05, na.rm=TRUE))
+
+cdata
+```
+
+
+# Exploratory factor analysis
+
+We use exploratory factor analysis to identify latent factors in the data. We use the psych package. The correlation matrix of all considered items looks like this:
+
+```{r, fig.width=6.6, fig.height=6.6}
+sdata <- subset(data, select=c('SS04_01', 'SS04_02', 'SS04_03', 'SS04_06', 'SS08_01', 'SS08_02', 'SS08_03', 
+                              'SS08_04', 'SS05_05', 'SS03_01', 'SS03_02', 'SS03_03', 'SS03_04',
+                              'SB01_01', 'SB01_03', 'SB01_04', 'SB01_02', 'SS02', 'SB04_01'))
+
+cMat <- cor(sdata, use="pairwise.complete.obs")
+
+corPlot(cMat)
+```
+
+
+```{r, fig.height=10}
+solution <- fa(r = cMat, nfactors = 4, rotate = "promax", fm = "pa")
+fa.diagram(solution)
+```
+
+A provisional interpretation of the factors could be:
+
+* PA1: Affinity to school and a well-being at school
+
+* PA2: Ability to cope with school demands
+
+* PA3: Social integration
+
+* PA4: Aggressive Behavior
+
+
+## Reliability analysis
+
+
+
+
+
