@@ -829,11 +829,6 @@ ggplot(tmp, aes(x=SS05_05, y=UB06_01)) +
 ```
 
 
-
-#I want to go back to school vs I feel supported by my teachers
-
-#Predict I feel supported from positive and negative properties
-
 \newpage
 # Exploratory factor analysis
 
