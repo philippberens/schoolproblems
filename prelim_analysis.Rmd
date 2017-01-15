@@ -1,6 +1,6 @@
 ---
 title: "Problems in school reported by children in regular and hospital schools"
-author: "Judith Janschewski (TU Dortmund) and Philipp Berens (Uni Tübingen)"
+author: "Judith Janschewski (TU Dortmund) and Philipp Berens (Uni T?bingen)"
 output:
   pdf_document:
     df_print: kable
@@ -19,8 +19,54 @@ library(mice)
 library(glmnet)
 library(tidyr)
 
-knitr::opts_chunk$set(fig.width=5,  fig.height=2.5, warning=FALSE, echo=FALSE)
+knitr::opts_chunk$set(fig.width=8,  fig.height=2.5, warning=FALSE, echo=FALSE)
 ```
+
+```{r}
+## Gives count, mean, standard deviation, standard error of the mean, and confidence interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE2 <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- plyr::rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+```
+
+
 
 # Dataset
 
@@ -31,15 +77,18 @@ data <- subset(data, select=c('TYP','SD01','sdq_total','sdq_external','sdq_inter
                               'SS04_02', 'SS04_03', 'SS04_06', 'SS08_01', 'SS08_02', 'SS08_03', 
                               'SS08_04', 'SS05_05', 'SS03_01', 'SS03_02', 'SS03_03', 'SS03_04',
                               'SB01_01', 'SB01_03', 'SB01_04', 'SB01_02', 'SS02', 'SB04_01',
-                              'SD25'))
+                              'SD25', 'UB06_01', 'GE06_01', 'GE06_02', 'GE06_03', 'GE06_04', 
+                              'GE06_05', 'GE06_06'))
 
 data <- plyr::rename(data,c("TYP"="school_type","SD01"="gender","SD25"="age"))
 
 
 data$age <- factor(mapvalues(data$age,from=c(1,2,3,4), to=c("11-12","13-14","15-16","17-18")))
 data$raised_sdq <- factor(data$sdq_total>=15)
+data$group <- factor(data$school_type,levels=c("A","A/SDQ+","K"))
+data$group[data$school_type=="A" & data$raised_sdq==TRUE] <- "A/SDQ+" 
 
-fdata <- filter(data, !is.na(data$raised_sdq) & !is.na(data$gender)) 
+fdata <- filter(data, !is.na(data$raised_sdq)) 
 
 ```
 
@@ -77,7 +126,7 @@ cdata
 ```
 
 
-
+\newpage
 # Validating the SDQ results
 
 We explore the distribution of SDQ scores for regular (A) and hospital (K) schools separately. The thin  lines indicate the four scale levels for a *slightly raised* score (15-17), a *high* score (18-19) and a *very high* score (>20).
@@ -88,7 +137,7 @@ ggplot(fdata, aes(x=sdq_total)) +
   geom_vline(aes(xintercept=17.5), color="darkgrey", linetype="dashed") + 
   geom_vline(aes(xintercept=19.5), color="darkgrey", linetype="dashed") + 
   geom_histogram(aes(y=..density..),breaks=seq(-.5,40.5,1),alpha=.5) +    
-  facet_grid(school_type ~ gender ) +   
+  facet_grid(school_type ~ . ) +   
   xlab("SDQ") + ylab("Number") + 
   theme_minimal(base_size=12)  
 ```
@@ -109,7 +158,7 @@ The percentage of students with raised SDQ in general schools corresponds approx
 
 ```{r fraction_raised, echo=FALSE}
 
-cdata <- ddply(data, c("raised_sdq"), summarise,
+cdata <- ddply(data, c("school_type"), summarise,
                   N    = length(sdq_total),
                   fraction_raised = mean(sdq_total>=15, na.rm=TRUE),
                   fraction_vhigh = mean(sdq_total>=20, na.rm=TRUE))
@@ -117,6 +166,7 @@ cdata <- ddply(data, c("raised_sdq"), summarise,
 cdata
 ```
 
+\newpage
 # Overview of item responses
 
 We first provide an overview of several of the response items.
@@ -124,46 +174,82 @@ We first provide an overview of several of the response items.
 ## Social problems
 
 ```{r}
-ggplot(fdata , aes(x=SS04_01)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
-  xlab("I often have conflicts with other students") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+p1 <- ggplot(fdata, aes(x=SS04_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
+  xlab("I have conflicts with other students") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS04_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I have conflicts with other students") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SS04_02)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+
+p1 <- ggplot(fdata, aes(x=SS04_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I often have conflicts with teachers") + ylab("Relative frequency") + 
-theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS04_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I often have conflicts with teachers") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
 ```
 
 
 
 ```{r}
 
-ggplot(fdata, aes(x=SS04_03)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SS04_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I isolated myself recently in school") + ylab("Relative frequency") + 
-theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS04_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I isolated myself recently in schoonl") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SS04_06)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+
+p1 <- ggplot(fdata, aes(x=SS04_06)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I do not like large groups like my class") + ylab("Relative frequency") + 
-theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS04_06)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I am bullied by other students") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 
 ```{r , echo=FALSE}
 
-cdata <- ddply(fdata, c("raised_sdq", "gender"), summarise,
+cdata <- ddply(fdata, c("group"), summarise,
                   N    = length(sdq_total),
                   conflict_stud = mean(SS04_01, na.rm=TRUE),
                   conflict_teach = mean(SS04_02, na.rm=TRUE),
@@ -176,44 +262,80 @@ cdata
 
 ```{r}
 
-ggplot(fdata, aes(x=SS08_01)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+
+p1 <- ggplot(fdata, aes(x=SS08_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I have friends in my class") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS08_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I have friends in my class") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
+
 ```
 
-```{r}
+```{r, fig.width=8, fig.height=3}
 
-ggplot(fdata, aes(x=SS08_02)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SS08_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I am bullied by other students") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS08_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I am bullied by other students") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SS08_03)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SS08_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I am an outsider") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS08_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I am an outsider") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SS08_04)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SS08_04)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("Sometimes I am agressive") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS08_04)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("Sometimes I am agressive") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
 ```
 
 
 ```{r , echo=FALSE}
 
-cdata <- ddply(fdata, c("raised_sdq", "gender"), summarise,
+cdata <- ddply(fdata, c("group"), summarise,
                   N    = length(sdq_total),
                   friends = mean(SS08_01, na.rm=TRUE),
                   bullying = mean(SS08_02, na.rm=TRUE),
@@ -227,47 +349,81 @@ cdata
 
 ```{r}
 
-ggplot(fdata, aes(x=SS03_01)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SS03_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("My school performance declined last year") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS03_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("My school performance declined last year") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
-The next item shows a pretty centered, almost Normal distribution. This is interesting - I would imaginge this may indicate that the students did not understand the question properly.
 
 ```{r}
 
-ggplot(fdata, aes(x=SS03_02)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
-  xlab("I can concentrate well on school content") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+p1 <- ggplot(fdata, aes(x=SS03_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
+  xlab("I can concentrate well in school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS03_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I can concentrate well in school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
 ```
 
 
 
 ```{r}
 
-ggplot(fdata, aes(x=SS03_03)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SS03_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I can work independently") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS03_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I can work independently") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SS03_04)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SS03_04)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
+  xlab("I qickly loose motivation to work") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS03_04)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
   xlab("I quickly loose motivation to work") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 ```{r , echo=FALSE}
 
-cdata <- ddply(fdata, c("raised_sdq", "gender"), summarise,
+cdata <- ddply(fdata, c("group"), summarise,
                   N    = length(sdq_total),
                   perf_down = mean(SS03_01, na.rm=TRUE),
                   concentrate = mean(SS03_02, na.rm=TRUE),
@@ -282,45 +438,82 @@ cdata
 
 ```{r}
 
-ggplot(fdata, aes(x=SB01_01)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SB01_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I like to go to school") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SB01_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I like to go to school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SB01_03)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SB01_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("I am afraid of going to school") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
-```
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
 
-The next item again may not have been properly understood:
+p2 <- ggplot(fdata, aes(x=SB01_03)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I am afraid of going to school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
+```
 
 ```{r}
 
-ggplot(fdata, aes(x=SB01_04)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
-  xlab("I can easily handle what is asked of me at school") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+p1 <- ggplot(fdata, aes(x=SB01_04)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
+  xlab("I can easily handle what\n is asked of me at school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SB01_04)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("I can easily handle what\n is asked of me at school") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
+
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SB01_02)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+
+p1 <- ggplot(fdata, aes(x=SB01_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("School is important for me") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SB01_02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("School is important for me") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
+
 ```
 
 ```{r , echo=FALSE}
 
-cdata <- ddply(fdata, c("raised_sdq", "gender"), summarise,
+cdata <- ddply(fdata, c("group"), summarise,
                   N    = length(sdq_total),
                   like_school = mean(SB01_01, na.rm=TRUE),
                   afraid = mean(SB01_03, na.rm=TRUE),
@@ -334,33 +527,53 @@ cdata
 
 ```{r}
 
-ggplot(fdata, aes(x=SB04_01)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
+p1 <- ggplot(fdata, aes(x=SB04_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
   xlab("School is a burden for me") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SB04_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("School is a burden for me") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 ```{r}
 
-ggplot(fdata, aes(x=SS02)) +
-  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "dodge", binwidth=1, center=1) +    
-  facet_grid(. ~gender) +   
-  xlab("How often were you absent from school last year?") + ylab("Relative frequency") + 
-  theme_minimal(base_size=12)  
+p1 <- ggplot(fdata, aes(x=SS02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=1, center=1) +    
+  xlab("How often were you abesent from school last year") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+p2 <- ggplot(fdata, aes(x=SS02)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "fill", binwidth=1, center=1) +    
+  xlab("How often were you absent from school last year") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+multiplot(p1,p2,cols=2)
+
 ```
 
 ```{r, fig.width=4}
 
 ggplot(fdata, aes(x=SS05_05)) +
   geom_histogram(aes(y=..density..,fill=gender), position = "dodge", binwidth=1, center=1) +    
-  xlab("After my stay at the clinic, I want to go back to my old school") + ylab("Relative frequency") + 
+  xlab("After my stay at the clinic, \n I want to go back to my old school") + ylab("Relative frequency") + 
   theme_minimal(base_size=12)  
+
+
 ```
 
 ```{r , echo=FALSE}
 
-cdata <- ddply(fdata, c("raised_sdq", "gender"), summarise,
+cdata <- ddply(fdata, c("group"), summarise,
                   N    = length(sdq_total),
                   burden = mean(SS04_01, na.rm=TRUE),
                   absence = mean(SS02, na.rm=TRUE),
@@ -369,13 +582,95 @@ cdata <- ddply(fdata, c("raised_sdq", "gender"), summarise,
 cdata
 ```
 
-# Classification analysis
+
+\newpage
+# Classification between healthy students and students with psychological problems
 
 We have quite a few missing values in the predictor variables. For now, we impute them using the mice package [link](https://www.jstatsoft.org/article/view/v045i03).
 
 ```{r}
 
-x <- select(data,c(-gender,-school_type,-age,-sdq_total,-sdq_internal,-sdq_external,-SS05_05,-raised_sdq)) 
+x <- select(data,c(-gender,-school_type,-age,-sdq_total,-sdq_internal,-sdq_external,-SS05_05,-raised_sdq,-group)) 
+
+xi <- mice(x, printFlag = FALSE, seed = 1000)
+xi <- mice::complete(xi,1) %>%
+      as.matrix() 
+
+```
+
+We try to predict whether a student is either a student of a regular school with an SDQ<15 or a student of a hospital school/student of a regular school with SDQ>15 using the glmnet package [link](http://web.stanford.edu/~hastie/glmnet/glmnet_alpha.html).
+
+```{r}
+
+# format data
+y <- as.matrix(data$group=="K" | data$group=="A/SDQ+")   # labels
+
+idx <- !is.na(y)
+xx <- xi[idx,]
+y <- factor(y[idx,])
+g <- data$group[idx]
+
+# fit models
+cvfit = cv.glmnet(xx, y, family="binomial", nfolds = 50, alpha = .95)
+w <- coef(cvfit, s = "lambda.1se") %>% as.matrix()
+yp <- predict(cvfit, newx = xx, s = "lambda.1se")
+
+res <- data.frame(y,g,yp)
+colnames(res) <- c('y','group','yp')
+
+```
+
+The performance of this classifier is:
+
+```{r}
+res$pred <- res$yp>0
+res$correct <- res$pred == res$y
+
+cdata <- ddply(res, c("group"), summarise,
+                  N    = length(correct),
+                  p_correct = mean(correct, na.rm=TRUE) * 100)
+
+cdata
+```
+
+We can plot the weights to visualize influential items:
+
+```{r, echo=FALSE, fig.width=6,fig.height=6}
+
+# collect weights
+weights <- data.frame(rownames(w)[2:length(w)],w[2:length(w)])
+colnames(weights) <- c('item','weight')
+
+p1 <- ggplot(weights, aes(x=item, y= weight)) + 
+   geom_bar(stat = "identity", position = "dodge") +
+   theme_minimal(base_size=12) +
+   theme(axis.text.x = element_text(angle=45, vjust=.5))
+
+p2 <- ggplot(res,aes(x=yp,fill=group)) +
+    geom_histogram(position="dodge") +
+   theme_minimal(base_size=12) +
+  xlab('Projection on w')
+
+multiplot(p1,p2,cols=1)
+
+```
+
+The influential items are :
+
+* School is important for me
+
+* School is a burden for me
+
+* I have conflicts with teachers
+
+\newpage
+# SDQ Prediction
+
+We have quite a few missing values in the predictor variables. For now, we impute them using the mice package [link](https://www.jstatsoft.org/article/view/v045i03).
+
+```{r}
+
+x <- select(data,c(-gender,-school_type,-age,-sdq_total,-sdq_internal,-sdq_external,-SS05_05,-raised_sdq,-group)) 
 
 xi <- mice(x, printFlag = FALSE, seed = 1000)
 xi <- mice::complete(xi,1) %>%
@@ -473,6 +768,73 @@ ggplot(preds, aes(x=orig,y=pred)) +
 The correlation between the original values and the predictions is high (total: `r cor(y,yp)`, internal: `r cor(yi,yip)`, external: `r cor(ye,yep)`), indicating good prediction.
 
 
+\newpage
+# Support through teachers
+
+```{r , echo=FALSE}
+
+cdata <- ddply(fdata, c("group"), summarise,
+                  N    = length(sdq_total),
+                  nans = sum(is.na(UB06_01)),
+                  fraction = mean(is.na(UB06_01)))
+
+cdata
+```
+
+
+```{r}
+
+ggplot(data, aes(x=UB06_01)) +
+  geom_histogram(aes(y=..density..,fill=group), position = "dodge", binwidth=10, center=5) +     
+  xlab("- Support for problems +") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  
+```
+
+
+
+```{r}
+ggplot(data, aes(x=sdq_total,y=UB06_01, color=group)) +
+  geom_point(position=position_jitter(width=.3), size=1) + 
+  geom_smooth(method=lm)
+
+```
+
+The spearman correlation is `r cor(data['sdq_total'],data['UB06_01'],use="pairwise.complete.obs", method="spearman")` for total SDQ, `r cor(data['sdq_internal'],data['UB06_01'],use="pairwise.complete.obs", method="spearman")` for internalizing SDQ and `r cor(data['sdq_external'],data['UB06_01'],use="pairwise.complete.obs", method="spearman")` for externalizing SDQ. 
+
+
+```{r}
+mdl <- lm(UB06_01 ~ sdq_total + school_type,data=data)
+summary(mdl)
+
+```
+
+
+```{r}
+mdl2 <- lm(UB06_01 ~ sdq_internal * sdq_external + school_type,data=data)
+summary(mdl)
+
+```
+
+
+```{r, fig.width=3,fig.height=4}
+
+tmp <- summarySE2(data, measurevar = "UB06_01",groupvars = "SS05_05", na.rm=TRUE)
+
+ggplot(tmp, aes(x=SS05_05, y=UB06_01)) + 
+    geom_errorbar(aes(ymin=UB06_01-se, ymax=UB06_01+se), width=.1) +
+    geom_point() +    
+  xlab("After my stay at the clinic, \n I want to go back to my old school") + ylab("I feel supported") +
+  ylim(c(0,100))+ xlim(c(0,6))+
+  theme_minimal(base_size=12)  
+```
+
+
+
+#I want to go back to school vs I feel supported by my teachers
+
+#Predict I feel supported from positive and negative properties
+
+\newpage
 # Exploratory factor analysis
 
 We use exploratory factor analysis to identify latent factors in the data. We use the psych package. The correlation matrix of all considered items looks like this:
@@ -484,11 +846,6 @@ sdata <- subset(data, select=c('SS04_01', 'SS04_02', 'SS04_03', 'SS04_06', 'SS08
 
 cMat <- cor(sdata, use="pairwise.complete.obs")
 
-corPlot(cMat)
-```
-
-
-```{r, fig.height=10}
 solution <- fa(r = cMat, nfactors = 4, rotate = "promax", fm = "pa")
 fa.diagram(solution)
 ```
@@ -504,7 +861,6 @@ A provisional interpretation of the factors could be:
 * PA4: Aggressive Behavior
 
 
-## Reliability analysis
 
 
 
