@@ -1,0 +1,178 @@
+---
+title: "Problems in school reported by children in regular and hospital schools"
+author: "Judith Janschewski (TU Dortmund) and Philipp Berens (Uni Tuebingen)"
+output:
+  pdf_document:
+    df_print: kable
+    number_sections: yes
+  html_notebook: default
+---
+
+```{r echo=FALSE, warning=FALSE}
+#library(car)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(Rmisc)
+library(psych)
+library(mice)
+library(glmnet)
+library(tidyr)
+
+knitr::opts_chunk$set(fig.width=8,  fig.height=2.5, warning=FALSE, echo=FALSE)
+```
+
+```{r summary function}
+## Gives count, mean, standard deviation, standard error of the mean, and confidence interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE2 <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- plyr::rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+```
+
+
+
+# Dataset
+
+```{r echo=FALSE}
+# import the data
+data <- read.csv("../data/schooldata_withsdq.csv",na.strings=c("-9","NA"," ","-1","other"))
+data <- subset(data, select=c('TYP','SD01','SD25','sdq_total','sdq_external','sdq_internal','GE04_01','GE02_01',
+                              'GE02_09','GE02_09','UB06_01','UB05_01'))
+
+data <- plyr::rename(data,c("TYP"="school_type","SD01"="sex","SD25"="age","GE04_01"="self_gender"))
+
+
+data$age <- factor(mapvalues(data$age,from=c(1,2,3,4), to=c("11-12","13-14","15-16","17-18")))
+data$raised_sdq <- factor(data$sdq_total>=15)
+data$group <- factor(data$school_type,levels=c("A","A/SDQ+","K"))
+data$group[data$school_type=="A" & data$raised_sdq==TRUE] <- "A/SDQ+" 
+
+fdata <- filter(data, !is.na(data$sex)) 
+
+```
+
+The dataset contains questionnaire responses of `r nrow(data)` students from regular and hospital schools. The following tables provides an overview: 
+
+```{r results='asis'}
+cdata <- ddply(fdata, c("school_type", "sex"), summarise,
+               N    = length(sdq_total))
+
+cdata
+```
+
+```{r}
+
+fdata$typical <- fdata$self_gender
+ind = fdata$sex=='male'
+fdata$typical[ind] <- 101 - fdata$typical[ind]
+
+```
+
+
+```{r fig.height=6, fig.width=5}
+
+cdat <- ddply(fdata, "sex", summarise, self.mean=mean(self_gender, na.rm=TRUE), typical.mean=mean(typical, na.rm=TRUE))
+
+p1 <- ggplot(fdata, aes(x=self_gender, fill=sex)) +
+        geom_histogram(binwidth=5, alpha=.5, position="identity") +
+        geom_vline(data=cdat, aes(xintercept=self.mean,  colour=sex),
+               linetype="dashed", size=1) + 
+        xlab("Self-reported gender")
+
+
+p2 <- ggplot(fdata, aes(x=typical, fill=sex)) +
+        geom_histogram(binwidth=5, alpha=.5, position="identity")+
+        geom_vline(data=cdat, aes(xintercept=typical.mean,  colour=sex),
+               linetype="dashed", size=1) + 
+        xlab("Match of self-reported gender to sex")
+
+
+#p1 <- ggplot(fdata, aes(x=sex, y= self_gender)) + 
+#   geom_histogram() +
+#   theme_minimal(base_size=12)
+
+
+multiplot(p1,p2,cols=2)
+#plot(p1)
+
+```
+
+```{r fig.height=4, fig.width=10}
+
+p1 <- ggplot(fdata, aes(x=typical, y= sdq_total, color=school_type)) +
+  geom_point()+
+  geom_smooth(method=lm) 
+
+
+p2 <- ggplot(fdata, aes(x=typical, y= sdq_total, color=sex)) +
+  geom_point()+
+  geom_smooth(method=lm) 
+
+  
+
+multiplot(p1,p2,cols=2)
+
+
+```
+```{r}
+model <- lm(data = fdata, formula = sdq_total ~ typical*school_type + sex + age)
+
+summary.lm(model)
+
+```
+```{r}
+
+
+p1 <- ggplot(filter(fdata, !is.na(fdata$raised_sdq)) , aes(x=typical)) +
+  geom_histogram(aes(y=..density..,fill=raised_sdq), position = "fill", binwidth=10, center=1) +    
+  xlab("XX") + ylab("Relative frequency") + 
+  theme_minimal(base_size=12)  +
+  scale_fill_brewer(palette="Spectral")
+
+plot(p1)
+```
+
+
+\newpage
+
+
+
+
+

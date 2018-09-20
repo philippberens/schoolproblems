@@ -1,14 +1,14 @@
 ---
 title: "Problems in school reported by children in regular and hospital schools"
-author: "Judith Janschewski (TU Dortmund) and Philipp Berens (Uni T?bingen)"
+author: "Judith Janschewski (TU Dortmund) and Philipp Berens (Uni Tuebingen)"
 output:
+  html_notebook: default
   pdf_document:
     df_print: kable
     number_sections: yes
-  html_notebook: default
 ---
 
-```{r global_options, include=FALSE}
+```{r global_options, echo=FALSE, warning=FALSE}
 #library(car)
 library(plyr)
 library(dplyr)

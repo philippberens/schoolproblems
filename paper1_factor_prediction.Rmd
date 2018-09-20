@@ -1,0 +1,274 @@
+---
+title: "Schulische Prädiktoren psychischer Erkrankung bei Jugendlichen"
+author: "Judith Janschewski (TU Dortmund) and Philipp Berens (Uni Tuebingen)"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    df_print: kable
+    number_sections: yes
+  html_notebook: default
+---
+
+```{r global_options, message=FALSE, warning=FALSE, include=FALSE}
+#library(car)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(Rmisc)
+library(psych)
+#library(mice)
+library(GPArotation)
+library(glmnet)
+library(tidyr)
+library(caret)
+
+knitr::opts_chunk$set(fig.width=8,  fig.height=2.5, warning=FALSE, echo=FALSE)
+```
+
+```{r echo=FALSE}
+# import the data
+data <- read.csv("D:/lab/projects/schoolproblems2/data/schooldata_withsdq.csv",na.strings=c("-9","NA"," ","-1","other"))
+data <- subset(data, select=c('TYP','SD01','sdq_total','sdq_external','sdq_internal','SS04_01',
+                              'SS04_02', 'SS04_03', 'SS04_06', 'SS08_01', 'SS08_02', 'SS08_03', 
+                              'SS08_04', 'SS05_05', 'SS03_01', 'SS03_02', 'SS03_03', 'SS03_04',
+                              'SB01_01', 'SB01_03', 'SB01_04', 'SB01_02', 'SS02', 'SB04_01',
+                              'SD25', 'UB06_01', 'GE06_01', 'GE06_02', 'GE06_03', 'GE06_04', 
+                              'GE06_05', 'GE06_06'))
+
+data <- plyr::rename(data,c("TYP"="school_type","SD01"="gender","SD25"="age"))
+
+
+data$age <- factor(mapvalues(data$age,from=c(1,2,3,4), to=c("11-12","13-14","15-16","17-18")))
+data$raised_sdq <- factor(data$sdq_total>=15)
+data$group <- factor(data$school_type,levels=c("A","A/SDQ+","K"))
+data$group[data$school_type=="A" & data$raised_sdq==TRUE] <- "A/SDQ+" 
+
+fdata <- filter(data, !is.na(data$raised_sdq)) 
+
+```
+
+# Explorative Faktoranalyse
+
+Wir benutzen explorative Faktoranalyse um Konstrukte zu identifizieren, die die Antwortvielfalt in den Daten erklären können. Dafür benutzen wir das _psych_-Paket.
+
+### Wieviele Faktoren werden benötigt?
+
+Um die optimale Anzahl Faktoren zu bestimmen, berechnen wie das _Bayesian Information Criterion_ in Abhängigkeit der Anzahl von Faktoren. Dieses balanciert die Fähigkeit des Faktorenmodells, die Daten zu erklären und die Modellkomplexität.
+
+```{r, fig.width=3, fig.height=3}
+sdata <- subset(data, select=c('SS04_01', 'SS04_02', 'SS04_03', 'SS04_06', 'SS08_01', 'SS08_02', 'SS08_03', 
+                              'SS08_04', 'SS03_01', 'SS03_02', 'SS03_03', 'SS03_04',
+                              'SB01_01', 'SB01_03', 'SB01_04', 'SB01_02', 'SS02', 'SB04_01'))
+
+# 'SS05_05'
+
+cMat <- cor(sdata, use="pairwise.complete.obs")
+
+nfacs <- seq(2,8)
+bic <- rep(0,length(nfacs)-1)
+for (i in nfacs){
+  mod <- fa(r = cMat, nfactors = i, rotate = "promax", fm = "pa", n.obs = nrow(sdata))
+  bic[i-1] <- mod$EBIC
+}
+
+tmp <- data.frame(nfacs,bic)
+
+ggplot(tmp, mapping = aes(x=nfacs,y=bic)) +
+  geom_point() +
+  xlab('Number of factors') + 
+  ylab('Empirical BIC')
+
+
+
+```
+
+Das empirische BIC ist für vier Faktoren am niedrigsten. Dies ist daher die optimale Anzahl von Faktoren.
+
+### Faktoranalyse mit vier Faktoren
+
+Wir nutzen Faktoranalyse mit den bestimmten vier Faktoren mit der _promax_-Rotation aus dem _psych_-Paket. 
+
+```{r, fig.width=7, fig.height=7}
+solution <- fa(r = cMat, nfactors = 4, rotate = "promax", fm = "pa",n.obs = nrow(sdata))
+fa.diagram(solution, simple=FALSE, main = "")
+```
+
+Die Abbildung ist nicht so schön, aber das kann man später noch aufhübschen. 
+
+Eine vorläufige Interpretation der Faktoren könnte lauten:
+
+PA 4: Fähigkeit, mit Schulanforderungen umzugehen
+
+* SS03_02 Ich kann mich gut auf schulische Inhalte konzentrieren. (+)
+* SB01_04 Ich kann gut bewältigen, was die Schule von mir verlangt. (+)
+* SS03_03 Ich kann selbstständig arbeiten. (+)
+* SS03_01 Meine schulischen Leistungen haben sich im letzten Jahr verschlechtert. (-)
+* SB04_01 Mich belastet, was die Schule von mir verlangt. (-)
+* SS03_04 Ich verliere schnell die Lust beim Arbeiten. (-)
+* SB01_02 Die Schule ist mir wichtig. (+)
+* SB01_01 Ich gehe gerne zur Schule. (+)
+
+PA 2: Fehlen sozialer Integration
+
+* SS08_02 Ich werde von anderen Schülerinnen und Schülern gemobbt. (+)
+* SS08_03 Ich bin ein Außenseiter/eine Außenseiterin in meiner Klasse. (+)
+* SS04_06 Ich fühle mich in großen Gruppen wie meiner Klasse unwohl. (+)
+* SS08_01 Ich habe Freunde oder Freundinnen in meiner Klasse. (-)
+* SS04_03 Ich habe mich in letzter Zeit in der Schule sehr zurückgezogen. (+)
+* SS04_01 Ich habe häufig Konflikte/Streit mit meinen Mitschüler(innen). (+)
+
+PA 1: Mangelndes Wohlbefinden in der Schule
+
+* SB01_03 Ich habe Angst in die Schule zu gehen. (+)
+* SS04_03 Ich habe mich in letzter Zeit in der Schule sehr zurückgezogen. (+)
+* SS02    Fehlzeiten (+)
+* SB01_01 Ich gehe gerne zur Schule. (-)
+* SB01_02 Die Schule ist mir wichtig. (-)
+
+PA3: Agressives Verhalten
+
+* SS08_04 Manchmal platze ich in der Schule vor Wut und verhalte mich aggressiv. (+)
+* SS04_02 Ich habe häufig Konflikte/Streit mit meinen Lehrer(innen). (+)
+* SS04_01 Ich habe häufig Konflikte/Streit mit meinen Mitschüler(innen). (+)
+
+Die graphische Darstellung ist etwas vereinfacht. Es werden nur Faktor-Loadings > 0.3 gezeigt. Hier sind die tatsächlichen Loadings:
+
+```{r}
+solution$loadings
+
+```
+
+
+### Vorhersage psychischer Probleme aus den schulischen Faktoren
+
+Wir versuchen aus diesen Faktoren vorherzusagen, ob Kinder auf die Klinikschule gehen oder auf eine Regelschule. Wir beschränken uns dabei auf Kinder von Regelschulen, die keinen erhöhten SDQ aufweisen. Dazu nutzen wir logistische Regression.
+
+```{r}
+data_scores <- factor.scores(x=sdata,f=solution,impute="mean")
+
+X <- data_scores$scores
+y <- data$school_type
+
+idx <- !(data$group=="A/SDQ+") & !(is.na(y))
+
+X <- X[idx,]
+y <- droplevels(y[idx])
+
+```
+
+Wir benutzen das _caret_-Paket zum fitten und evaluieren der Modelle mit Kreuzvalidierung (bootstrap resampling, 25 Iterationen). Dabei werden die Trainings- und Testdaten so erstellt, dass gleich viele Schüler aus beiden Klassen darin sind. Als Metrik zur Auswahl des besten Modells benutzten wir den AUC/ROC-Wert ('Area under the curve'). 
+
+```{r}
+
+set.seed(825)
+
+nFolds <- 25
+
+fitControl <- trainControl(method = "boot" , number = nFolds,
+                           summaryFunction=twoClassSummary, 
+                           #selectionFunction=tolerance,
+                           classProbs=TRUE, 
+                           sampling = "down", 
+                           savePredictions = TRUE)
+
+fit1 <- train(X, y, method = "glmnet", trControl=fitControl, metric = "ROC")
+
+fit1
+```
+
+Um den Klassifizierer zu evaluieren, berechnen wir die ROC-Kurve ('Receiver-Operating Characteristic') und den AUC-Wert ('Area under the curve'). Hier wird die Spezifizität als Funktion der Sensitivität visualisiert. 
+
+```{r}
+ 
+fold_auc <- array(0,c(nFolds,1))
+
+df <- data.frame(matrix(ncol = 4, nrow = 0))
+
+for (i in 1:nFolds){
+  selInd <- fit1$pred$Resample == sprintf("Resample%02.0f",i) & fit1$pred$alpha==0.1 & fit1$pred$lambda==fit1$finalModel$lambdaOpt
+  
+  roc_out <- pROC::roc(as.numeric(fit1$pred$obs[selInd]),fit1$pred$A[selInd])
+
+  fold_auc[i] <- roc_out$auc
+  
+  df <- rbind(df,cbind(1-roc_out$sensitivities,roc_out$specificities,roc_out$thresholds, i * array(1,c(length(roc_out$thresholds),1))))
+  
+} 
+
+colnames(df) <- c('sensitivity','specificity','threshold', 'fold')
+
+cat(sprintf("AUC: %.2f, SD: %.2f", mean(fold_auc), sd(fold_auc)))
+
+selInd <- fit1$pred$alpha==0.55 & fit1$pred$lambda==fit1$finalModel$lambdaOpt
+  
+roc_all <- pROC::roc(as.numeric(fit1$pred$obs[selInd]),fit1$pred$A[selInd])
+df2 <- data.frame(sensitivity = 1- roc_all$sensitivities, specificity = roc_all$specificities, threshold=roc_all$thresholds, fold=1)
+
+```
+
+
+```{r, fig.width=3, fig.height=3}
+#df <- data.frame(sens = 1- roc_out$sensitivities, spec = roc_out$specificities)
+
+ggplot(df, aes(x=sensitivity,y = specificity, group=fold)) +
+  geom_line(color="grey")+ 
+  geom_line(data=df2, mapping = aes(x=sensitivity, y=specificity)) + 
+  xlab('1 - Sensitivity') + 
+  ylab('Specificity') + 
+  geom_segment(x=0,y=0,xend=1,yend=1, linetype='dotted')  
+  
+  
+```
+
+Der AUC-Wert und die ROC-Kurve sehen gut aus. Wir berechnen noch weitere Maße, die für die Beschreibung der Performance wichtig sind:
+
+```{r, fig.width=5, fig.height=7}
+
+# selInd <- fit1$pred$alpha==0.1 & fit1$pred$lambda==fit1$finalModel$lambdaOpt
+
+yp = predict(fit1,newdata = X)
+
+confusionMatrix(data = yp, reference = y)
+
+
+```
+
+Der Klassifikator ist signifikant besser als ein Klassifikator, der rät. Die Sensitivität von 0.90 ist sehr gut, die Spezifizität etwas niedriger, da nicht alle Klinikschüler tatsächlich als solche identifiziert werden. Der PPV von 0.84 bedeutet, dass 84 Prozent aller als Regelschüler klassifizierten Schüler auch tatsächlich Regelschüler sind. Der NPV von 0.81 bedeutet, dass 81 Prozent aller als Klinikschüler klassifizierten Schüler auch tatsächlich Klinikschüler sind.
+
+Abschließend visualisieren wir den Einfluss der unterschiedlichen Faktoren abschätzen zu können.
+
+```{r, fig.width=6, fig.height=2}
+
+w <- varImp(fit1, scale = FALSE)$importance$Overall 
+
+f <- factor(c("Umgang mit schulischen Anforderungen", "Fehlende Integration", "Mangelndes Wohlbefinden", "Agressivität"),
+            levels=c("Umgang mit schulischen Anforderungen", "Fehlende Integration", "Mangelndes Wohlbefinden", "Agressivität"))
+            
+df <- data.frame(Wichtigkeit = w, Faktor=f)
+
+ggplot(df,aes(x=Faktor,y=Wichtigkeit)) + 
+  geom_bar(stat="identity") + 
+  coord_flip() +
+  geom_hline(yintercept = 0, linetype="dotted")
+
+
+
+```
+
+### Reliabilitätsanalyse
+
+Wir berechnen Cronbach's $\alpha$ and Guttman's $\lambda_6$ mit Hilfe des _psych_-Pakets. $\alpha$ misst die interne Konsistenz als Korrelation zwischen items, und $\lambda_6$ misst, wie gut sich ein Item aus den anderen Items mit Hilfe von Regression vorhersagen lässt. Werte von >0.85 sind sehr hoch und deuten auf sehr konsistente Antworten hin.
+
+```{r}
+rel <- alpha(sdata,check.keys=TRUE)
+
+rel$alpha.drop
+```
+
+
+
+
+
+
+
